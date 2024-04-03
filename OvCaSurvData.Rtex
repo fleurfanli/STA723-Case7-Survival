@@ -1,0 +1,180 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%  TCGA Survival Case Study              %%
+%%  Last Modified:   04/01/24 by ESI.     %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+\RequirePackage{natbib}
+%\usepackage{/home/fac/iversen/lib/bibtex/chicago}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{fullpage}
+\newcommand{\rinline}[1]{Error w/ Knitr}
+%% begin.rcode setup, include=FALSE
+% opts_chunk$set(fig.path='./figs/',cache.path='./cache/',tidy=TRUE,tidy.opts=list(width.cutoff=50))
+%% end.rcode
+ 
+\title{Ovarian Cancer Survival Analysis}
+\author{ESI}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section{Preliminary Data Processing \& EDA}
+
+\subsection{Import and Subset Data}
+
+%% begin.rcode
+% clin<-read.delim("clinical_patient_all_ov.txt",na=c("","na","NA","null"))
+% ##head(clin)
+% dim(clin)
+% if (nrow(clin)==length(unique(clin$bcr_patient_barcode))) rownames(clin)<-clin$bcr_patient_barcode
+% keep.names<-c("bcr_patient_barcode","age_at_initial_pathologic_diagnosis","days_to_death",
+%               "days_to_last_followup","days_to_tumor_progression","days_to_tumor_recurrence",
+%               "primary_therapy_outcome_success","residual_tumor","tumor_grade","tumor_stage",
+%               "vital_status","year_of_initial_pathologic_diagnosis","chemo_therapy",
+%               "hormonal_therapy","immuno_therapy","radiation_therapy")
+% clin<-clin[,keep.names]
+% new.names<-c("ID","AgeDX","DaysToDeath","DaysToLastFU","DaysToProgress","DaysToRecur",
+%              "PrimaryTherapySuccess","ResidualTumor","Grade","Stage","VitalStatus",
+%              "YearDX","ChemoTherapy","HormonalTherapy","ImmunoTherapy","RadiationTherapy")
+% colnames(clin)<-new.names
+% table(n.na<-apply(is.na(clin),1,sum))
+% ## clin[n.na==15,]            ## drop these
+% ## clin[(n.na>9)&(n.na<15),]  ## drop these
+% clin<-clin[n.na<10,]
+%% end.rcode
+
+\subsection{Add Tumor Subtype Data}
+
+%% begin.rcode, fig.width=6.5, fig.height=5.0
+% subtypes<-read.delim("TCGA.SubtypeCalls.txt",sep=" ",na=c("","na","NA","null"))
+% subtypes<-subtypes[,apply(is.na(subtypes),2,sum)==0]
+% head(subtypes)
+% colnames(subtypes)[2]<-"TumorSubtype"
+% ID2<-substr(subtypes$SampleID,6,7)
+% ID3<-substr(subtypes$SampleID,9,12)
+% subtypes$ID<-paste("TCGA",ID2,ID3,sep="-")
+% if (length(unique(subtypes$ID))==nrow(subtypes)) rownames(subtypes)<-subtypes$ID
+% table(rownames(subtypes) %in% rownames(clin))
+% temp<-merge(clin,subtypes,by=0,all.x=TRUE,all.y=FALSE)
+% rownames(temp)<-temp$Row.names
+% temp<-temp[,!(colnames(temp) %in% c("Row.names","ID.y"))]
+% colnames(temp)[1]<-"ID"
+% clin<-temp; rm(temp)
+% head(clin)
+%% end.rcode
+
+\subsection{Basic Summaries}
+
+%% begin.rcode, fig.width=6.5, fig.height=5.0
+% summary(clin)
+% table(clin$Stage,clin$VitalStatus,useNA="always")
+% table(is.na(clin$DaysToDeath),clin$VitalStatus,useNA="always")
+% table(clin$TumorSubtype,useNA="always")
+% table(clin$DaysToProgress <= clin$DaysToDeath)
+% summary(clin$DaysToDeath - clin$DaysToProgress)
+% table(clin$DaysToRecur <= clin$DaysToDeath)
+% summary(clin$DaysToDeath - clin$DaysToRecur)
+%% end.rcode
+
+\subsection{Output Data Frame}
+
+%% begin.rcode
+%  save(clin,file="OvCaSurvival.RData")
+%%  end.rcode
+
+
+\end{document}
+
+
+
+%% begin.rcode, fig.width=6.5, fig.height=5.0
+%% end.rcode
+
+%% begin.rcode, fig.width=6.5, fig.height=5.0
+%% end.rcode
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

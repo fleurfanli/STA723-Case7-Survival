@@ -1,0 +1,100 @@
+---
+title: "Case 7"
+author: "Li Fan and Shuo"
+format: pdf
+editor: visual
+---
+
+```{r, echo = FALSE, output = FALSE}
+#| label: load-packages
+#| message: false
+
+library(tidyverse)
+library(lme4)
+library(lmtest)
+library(mgcv)
+library(gamm4)
+library(survival)
+library(survminer)
+library(tidymv)
+library(xtable)
+
+# library(brms)
+# library(bayesplot)
+# library(tidyquant)
+
+# knitr options
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set the seed
+set.seed(42)
+```
+
+# EDA
+
+```{r}
+load("OvCaSurvival.RData") # df: clin
+dim(clin)
+head(clin)
+table(clin$TumorSubtype)
+```
+
+```{r}
+#colSums(is.na(clin))
+df = clin[!is.na(clin$TumorSubtype), ]
+df = df[!is.na(df$DaysToDeath), ]
+dim(df)
+colSums(is.na(df))
+```
+
+```{r}
+# add censored indicator
+df$censor = ifelse(df$DaysToLastFU < df$DaysToDeath, 1, 0)
+table(df$censor)
+```
+
+```{r}
+ggplot(df, aes(x = TumorSubtype, y = DaysToDeath)) +
+  geom_boxplot() +
+  labs(x = "TumorSubtype", y = "DaysToDeath") 
+
+```
+
+## **Kaplan-Meier**
+
+```{r}
+# The formula ~ 1 indicates that we are estimating the overall survival curve without any covariates.
+km_fit <- survfit(Surv(DaysToDeath, censor) ~ 1, data = df)
+# summary(km_fit)
+
+plot(km_fit, main = "Kaplan-Meier Survival Curve", 
+     xlab = "Time", ylab = "Survival Probability")
+```
+
+```{r}
+km_fit_group <- survfit(Surv(DaysToDeath, censor) ~ TumorSubtype, data = df)
+
+ggsurvplot(km_fit_group, data = df, 
+           title = "Kaplan-Meier Survival Curve by Tumor Subtype",
+           xlab = "Time", ylab = "Survival Probability",
+           legend.title = "Tumor Subtype",
+           legend = c(0.15, 0.2), # Adjust legend position
+           legend.labs = unique(df$TumorSubtype), 
+           ggtheme = theme_minimal())
+```
+
+## Cox model
+
+```{r}
+cox_model <- coxph(Surv(DaysToDeath) ~ TumorSubtype + RadiationTherapy + ChemoTherapy +
+                     HormonalTherapy + ImmunoTherapy, 
+                   data = df)
+summary(cox_model)
+
+```
+
+```{r}
+ggsurvplot(survfit(cox_model), color = "#2E9FDF",
+           ggtheme = theme_minimal())
+```

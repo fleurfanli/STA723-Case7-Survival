@@ -18,6 +18,9 @@ library(survival)
 library(survminer)
 library(tidymv)
 library(xtable)
+library(UpSetR)
+library(naniar)
+library(ggplot2)
 
 # library(brms)
 # library(bayesplot)
@@ -41,24 +44,88 @@ table(clin$TumorSubtype)
 ```
 
 ```{r}
-#colSums(is.na(clin))
-df = clin[!is.na(clin$TumorSubtype), ]
-df = df[!is.na(df$DaysToDeath), ]
-dim(df)
+# delete: both day to death and day to last follow up is NA
+clin = clin[!(is.na(clin$DaysToDeath) & is.na(clin$DaysToLastFU)),]
+# censor indicator: DaysToDeath == NA, censor = 1
+clin$censor = as.numeric(is.na(clin$DaysToDeath))
+# time: censored, DaysToLastFU; otherwise, DaysToDeath
+clin$time = ifelse(clin$censor, clin$DaysToLastFU, clin$DaysToDeath)
+# days to progress & recur: if NA, set to 0
+clin[is.na(clin$DaysToProgress), "DaysToProgress"] = 0
+clin[is.na(clin$DaysToRecur), "DaysToRecur"] = 0
+# remove column: "SampleID", "ResidualTumor"
+df = clin[,!colnames(clin) %in% c("DaysToDeath", "DaysToLastFU", "SampleID", "ResidualTumor")]
 colSums(is.na(df))
+gg_miss_upset(df, nsets = 8)
+df = na.omit(df)
 ```
 
 ```{r}
-# add censored indicator
-df$censor = ifelse(df$DaysToLastFU < df$DaysToDeath, 1, 0)
-table(df$censor)
-```
-
-```{r}
-ggplot(df, aes(x = TumorSubtype, y = DaysToDeath)) +
+ggplot(df, aes(x = TumorSubtype, y = time)) +
   geom_boxplot() +
   labs(x = "TumorSubtype", y = "DaysToDeath") 
 
+```
+
+```{r}
+ggplot(data = df, aes(x = AgeDX)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  ggtitle("Distribution of Age at Diagnosis") +
+  xlab("Age at Diagnosis") +
+  ylab("Count")
+```
+
+```{r}
+ggplot(data = df, aes(x = as.factor(Grade), y = time)) +
+  geom_boxplot() +
+  theme_minimal() +
+  ggtitle("Survival Time by Tumor Grade") +
+  xlab("Tumor Grade") +
+  ylab("Survival Time (days)")
+```
+
+```{r}
+ggplot(data = df, aes(x = AgeDX, y = time)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  ggtitle("Age at Diagnosis vs. Survival Time") +
+  xlab("Age at Diagnosis") +
+  ylab("Survival Time (days)")
+```
+
+```{r}
+ggplot(data = df, aes(x = time, fill = VitalStatus)) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~VitalStatus) +
+  theme_minimal() +
+  ggtitle("Density of Survival Times by Vital Status") +
+  xlab("Survival Time (days)") +
+  ylab("Density")
+```
+
+```{r}
+df %>% 
+  mutate(censor_name = ifelse(censor, "censored", "non-censored")) %>% 
+  ggplot(data = , aes(x = time)) +
+  geom_histogram(binwidth = 100, fill = "skyblue", color = "black", alpha = 0.7) +
+  facet_wrap(~censor_name, scales = "free_y") +
+  labs(title = "Survival Time Distribution by Censor Status",
+       x = "Survival Time (days)",
+       y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(data = df, aes(x = factor(censor), y = AgeDX, fill = factor(censor))) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "lightblue")) +
+  labs(title = "Age at Diagnosis by Censor Status",
+       x = "Censor Status",
+       y = "Age at Diagnosis",
+       fill = "Status") +
+  theme_minimal() +
+  scale_x_discrete(labels = c("0" = "Non-Censored", "1" = "Censored"))
 ```
 
 ## **Kaplan-Meier**
@@ -98,3 +165,7 @@ summary(cox_model)
 ggsurvplot(survfit(cox_model), color = "#2E9FDF",
            ggtheme = theme_minimal())
 ```
+
+Question
+
+missing data

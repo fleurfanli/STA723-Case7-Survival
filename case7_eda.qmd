@@ -131,8 +131,14 @@ ggplot(data = df, aes(x = factor(censor), y = AgeDX, fill = factor(censor))) +
 ## **Kaplan-Meier**
 
 ```{r}
+colnames(df)
+head(df)
+table(df$censor)
+```
+
+```{r}
 # The formula ~ 1 indicates that we are estimating the overall survival curve without any covariates.
-km_fit <- survfit(Surv(DaysToDeath, censor) ~ 1, data = df)
+km_fit <- survfit(Surv(time, censor) ~ 1, data = df)
 # summary(km_fit)
 
 plot(km_fit, main = "Kaplan-Meier Survival Curve", 
@@ -140,7 +146,7 @@ plot(km_fit, main = "Kaplan-Meier Survival Curve",
 ```
 
 ```{r}
-km_fit_group <- survfit(Surv(DaysToDeath, censor) ~ TumorSubtype, data = df)
+km_fit_group <- survfit(Surv(time, censor) ~ TumorSubtype, data = df)
 
 ggsurvplot(km_fit_group, data = df, 
            title = "Kaplan-Meier Survival Curve by Tumor Subtype",
@@ -153,19 +159,169 @@ ggsurvplot(km_fit_group, data = df,
 
 ## Cox model
 
-```{r}
-cox_model <- coxph(Surv(DaysToDeath) ~ TumorSubtype + RadiationTherapy + ChemoTherapy +
-                     HormonalTherapy + ImmunoTherapy, 
-                   data = df)
-summary(cox_model)
+### re-group
 
+Only fit using age, tumor stage & grade, and treatment
+
+```{r}
+dim(df)
+colnames(df)
+summary(df$AgeDX)
+table(df$Stage)
+table(df$Grade)
+table(df$RadiationTherapy)
+
+aa = apply(df, 1, function(row) any(row == "YES"))
+table(aa)
+rows_without_yes <- df[!aa, ]
+print(rows_without_yes)
+```
+
+Re-group grades and drop unknown grades, re-group stages
+
+```{r}
+dim(df)
+df2 <- df %>% 
+  filter(Grade != "GB" & Grade != "GX") %>%
+  mutate(Grade = recode_factor(Grade, "G1" = "low",
+                                      "G2" = "low",
+                                      "G3" = "high",
+                                      "G4" = "high"))
+dim(df2)
+df2 <- df2 %>% 
+  mutate(Stage = recode_factor(Stage, "IIA" = "II","IIB" = "II","IIC" = "II",
+                                "IIIA" = "III","IIIB" = "III","IIIC" = "III"))
+head(df2)
+
+table(df2$Grade)
+table(df2$Stage)
 ```
 
 ```{r}
-ggsurvplot(survfit(cox_model), color = "#2E9FDF",
+sum(is.na(df2))
+```
+
+regroup therapy
+
+```{r}
+df2$CombinedTherapy <- ifelse(df2$ChemoTherapy == "YES", "Chemo", "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$HormonalTherapy == "YES", "Hormonal", ""), 
+                              sep = "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$ImmunoTherapy == "YES", "Immuno", ""), 
+                              sep = "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$RadiationTherapy == "TES", "Radiation", ""), 
+                              sep = "")
+
+# Replace empty strings with "No"
+df2$CombinedTherapy[df2$CombinedTherapy == ""] <- "None"
+
+# Convert to factor
+df2$CombinedTherapy <- factor(df2$CombinedTherapy)
+
+# Check the levels
+table(df2$CombinedTherapy)
+```
+
+```{r}
+df2$Therapy <- ifelse(df2$ChemoTherapy == "YES" | 
+                        df2$HormonalTherapy == "YES" | 
+                        df2$ImmunoTherapy == "YES" | 
+                        df2$RadiationTherapy == "YES", "YES", "NO")
+
+df2$Therapy <- factor(df2$Therapy, levels = c("NO", "YES"))
+table(df2$Therapy)
+df2[df2$Therapy=='NO',]
+```
+
+### no tumor subtype
+
+```{r}
+# surv_obj <- Surv(time, censor, event = event, type = "counting")
+# tt(DaysToProgress) + tt(DaysToRecur)
+#ChemoTherapy + HormonalTherapy + ImmunoTherapy + RadiationTherapy,
+
+cox.simple <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade + Therapy, 
+                    robust = TRUE,
+                    data = df2)
+summary(cox.simple)
+
+ggsurvplot(survfit(cox.simple, data=df2), 
+           conf.int = TRUE,
            ggtheme = theme_minimal())
 ```
 
-Question
+```{r}
+cox.simple2 <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade +
+                       ChemoTherapy + HormonalTherapy + ImmunoTherapy + RadiationTherapy, 
+                     robust = TRUE,
+                   data = df2)
+summary(cox.simple2)
 
-missing data
+ggsurvplot(survfit(cox.simple2, data=df2), 
+           conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+# Proportional Hazards Assumption
+cox.zph <- cox.zph(cox.simple)
+cox.zph
+
+# Plot Schoenfeld residuals
+plot(cox.zph)
+```
+
+### with tumor subtype
+
+```{r}
+cox.type <- coxph(Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade + Therapy, 
+                  robust = TRUE,
+                   data = df2)
+summary(cox.type)
+
+ggsurvplot(survfit(cox.type, data=df2), 
+           conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+cox.zph(cox.type)
+```
+
+```{r}
+types <- levels(factor(df2$TumorSubtype))
+type_df <- with(df2,
+  data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[1], 4),
+                      Grade = rep(levels(df2$Grade)[1], 4),
+                      ChemoTherapy = rep(levels(factor(df2$ChemoTherapy))[1], 4),
+                      HormonalTherapy = rep(levels(factor(df2$HormonalTherapy))[1], 4),
+                      ImmunoTherapy = rep(levels(factor(df2$ImmunoTherapy))[1], 4),
+                      RadiationTherapy = rep(levels(factor(df2$RadiationTherapy))[1], 4))
+)
+
+type_df
+
+fit <- survfit(cox.type, data = type_df)
+ggsurvplot(fit,
+           data = type_df,
+           palette = "TumorSubtype", 
+           conf.int = TRUE,
+           ggtheme = theme_minimal()
+)
+
+```
+
+```{r}
+fit <- survfit(cox.type, newdata = type_df, data = df2)
+ggsurvplot(fit, conf.int = TRUE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```

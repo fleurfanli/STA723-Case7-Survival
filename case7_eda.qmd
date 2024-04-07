@@ -46,10 +46,10 @@ table(clin$TumorSubtype)
 ```{r}
 # delete: both day to death and day to last follow up is NA
 clin = clin[!(is.na(clin$DaysToDeath) & is.na(clin$DaysToLastFU)),]
-# censor indicator: DaysToDeath == NA, censor = 1
-clin$censor = as.numeric(is.na(clin$DaysToDeath))
+# censor indicator: DaysToDeath == NA, censored, alive
+clin$censor = as.numeric(!is.na(clin$DaysToDeath))
 # time: censored, DaysToLastFU; otherwise, DaysToDeath
-clin$time = ifelse(clin$censor, clin$DaysToLastFU, clin$DaysToDeath)
+clin$time = ifelse(clin$censor, clin$DaysToDeath, clin$DaysToLastFU)
 # days to progress & recur: if NA, set to 0
 clin[is.na(clin$DaysToProgress), "DaysToProgress"] = 0
 clin[is.na(clin$DaysToRecur), "DaysToRecur"] = 0
@@ -86,7 +86,7 @@ ggplot(data = df, aes(x = as.factor(Grade), y = time)) +
 ```
 
 ```{r}
-ggplot(data = df, aes(x = AgeDX, y = time)) +
+ggplot(data = df, aes(x = AgeDX, y = time, color = VitalStatus)) +
   geom_point(alpha = 0.6) +
   theme_minimal() +
   ggtitle("Age at Diagnosis vs. Survival Time") +
@@ -107,10 +107,10 @@ ggplot(data = df, aes(x = time, fill = VitalStatus)) +
 ```{r}
 df %>% 
   mutate(censor_name = ifelse(censor, "censored", "non-censored")) %>% 
-  ggplot(data = , aes(x = time)) +
+  ggplot(aes(x = time)) +
   geom_histogram(binwidth = 100, fill = "skyblue", color = "black", alpha = 0.7) +
-  facet_wrap(~censor_name, scales = "free_y") +
-  labs(title = "Survival Time Distribution by Censor Status",
+  facet_wrap(~VitalStatus, scales = "free_y") +
+  labs(title = "Survival Time Distribution by Vital Status",
        x = "Survival Time (days)",
        y = "Count") +
   theme_minimal()

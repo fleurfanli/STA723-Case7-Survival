@@ -61,6 +61,36 @@ df = na.omit(df)
 ```
 
 ```{r}
+# For recurrence
+recur = df$DaysToRecur > 0
+df_recur = df[recur,]
+df_recur$AgeDX = df_recur$AgeDX + (df_recur$DaysToRecur %/% 365)
+df_recur$recur_indic = 1
+
+df[recur,"VitalStatus"] = "LIVING"
+df[recur,"censor"] = 0
+df[recur, "time"] = df[recur, "DaysToRecur"]
+df$recur_indic = 0
+
+df = rbind(df, df_recur)
+
+# For progress
+progress = df$DaysToProgress > 0
+df_progress = df[progress,]
+df_progress$AgeDX = df_progress$AgeDX + round(df_progress$DaysToProgress / 365)
+df_progress$progress_indic = 1
+
+df[progress,"VitalStatus"] = "LIVING"
+df[progress,"censor"] = 0
+df[progress, "time"] = df[progress, "DaysToProgress"]
+df$progress_indic = 0
+
+df = rbind(df, df_progress)
+
+df = df[,!colnames(df) %in% c("DaysToRecur", "DaysToProgress")]
+```
+
+```{r}
 ggplot(df, aes(x = TumorSubtype, y = time)) +
   geom_boxplot() +
   labs(x = "TumorSubtype", y = "DaysToDeath") 

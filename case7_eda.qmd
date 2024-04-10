@@ -390,15 +390,54 @@ ggsurvplot(fit, conf.int = FALSE,
 ```
 
 ```{r}
-# formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade +
-#                                       recur_indic + progress_indic
-# 
 # cox.brms <- brm(formula_cox, data = df2,
 #                 family = exponential(),
 #                 prior = c(prior(normal(0, 2), class = b)),
 #                 chains = 2, iter = 2500, warmup = 500,
 #                 control = list(adapt_delta = 0.99))
 # # Increase adapt_delta if necessary for convergence
+formula <- bf(time ~ TumorSubtype + AgeDX + Stage + Grade +
+                                recur_indic + progress_indic)
+
+cox.brms <- brm(formula = formula, data = df2,
+                family = "cox",
+                prior = prior(normal(0, 2), class = b),
+                chains = 2, iter = 2500, warmup = 500,
+                control = list(adapt_delta = 0.99))
+
+```
+
+```{r}
+summary(cox.brms)
+
+mcmc_trace(cox.brms)
+```
+
+```{r}
+est = data.frame(fixef(cox.brms))
+est
+```
+
+```{r}
+data.frame(cbind(rownames(est),est$Estimate,exp(est$Estimate)))
+```
+
+```{r}
+new_data <- data.frame(matrix(0, nrow = nrow(data), 
+                              ncol = ncol(model.frame(cox.brms))))
+
+# Compute survival probabilities using the baseline hazard and the linear predictor
+surv_prob <- exp(-predict(cox.brms, newdata = new_data, type = "lp"))
+
+# Create a time sequence for plotting the survival curve
+times <- seq(0, max(data$time), by = 1)  # Adjust the time sequence as needed
+
+# Compute the survival probabilities at each time point
+survival_curve <- apply(surv_prob, 2, function(x) 1 - pmin(1, pmax(0, x * exp(cox.brms$baseline_hazard$hazard))))
+
+# Plot the survival curve
+plot(times, survival_curve[1, ], type = "l", ylim = c(0, 1), xlab = "Time", ylab = "Survival Probability", main = "Bayesian Cox Model Survival Curve")
+for (i in 2:nrow(survival_curve)) lines(times, survival_curve[i, ], col = i)
 
 ```
 
@@ -481,4 +520,108 @@ mcmc_intervals(posterior_mcmc[, c('betas.1','betas.2','betas.3')]) +
     vline_at(0,linetype="dashed")
 mcmc_intervals(posterior_mcmc[, c('betas.4','betas.5')])
 mcmc_intervals(posterior_mcmc[, c('betas.6','betas.7','betas.8')])
+```
+
+## survival curves
+
+```{r}
+result_df <- data.frame(
+  param = colnames(df_required),
+  coef = posterior_means[2:9], 
+  coef.exp = exp(posterior_means[2:9])  
+)
+result_df
+```
+
+```{r}
+hazard_ratio <- exp(as.matrix(cbind(1, df_required)) %*% matrix(posterior_means[1:9]))
+surv_probs <- exp(-hazard_ratio)
+length(surv_probs)
+summary(surv_probs)
+
+# expected_events <- sapply(surv_probs, function(surv_probs) sum(surv_probs))
+# summary(expected_events)
+# Calculate observed number of events
+#observed_events <- sum(df2$censor == 0)  # Assuming censoring indicator is 0 for events
+
+# Calculate residuals
+#residuals <- observed_events - expected_events
+
+#summary(residuals())
+
+
+```
+
+```{r}
+# Calculate the linear predictor
+linear_predictor <- as.matrix(cbind(1, df_required)) %*% matrix(posterior_means[1:9])
+
+```
+
+```{r}
+hazard_ratio <- exp(linear_predictor)
+
+# Create a survival object
+surv_object <- Surv(df2$time, df2$censor)
+
+# Fit a Cox proportional hazards model
+cox_model <- coxph(surv_object ~ linear_predictor)
+
+# Get the baseline hazard
+baseline_hazard <- basehaz(cox_model)
+```
+
+```{r}
+summary(cox_model)
+```
+
+```{r}
+# Extract residuals
+residuals <- resid(cox_model, type = "martingale")
+
+# Plot residuals
+ggplot(data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(binwidth = 0.2, fill = "lightblue", color = "black") +
+  labs(x = "Residuals", y = "Frequency") +
+  ggtitle("Histogram of Cox Model Residuals")
+```
+
+```{r}
+colnames(df_required)
+```
+
+```{r}
+new_df = data.frame(AgeDX = rep(mean(df_required$AgeDX),4),
+                    Stage = rep(max(df_required$Stage),4),
+                    Grade = rep(max(df_required$Grade),4),
+                    recur_indic = rep(0,4),
+                    progress_indic = rep(0,4),
+                    Immunoreactive = c(0,1,0,0),
+                    Mesenchymal =  c(0,0,1,0),
+                    Proliferative = c(0,0,0,1)
+                    )
+
+new_df
+```
+
+```{r}
+new_linear_predictor <- as.matrix(cbind(1, new_df)) %*% matrix(posterior_means[1:9])
+new_linear_predictor
+```
+
+```{r}
+# new_data <- data.frame(
+#   predicted_survival <- predict(cox_model, newdata = new_df, type = "expected"),
+#   linear_predictor <- predict(cox_model, newdata = new_df, type = "lp")
+# )
+# 
+# # Fit survival curves based on the predicted survival probabilities
+# surv_fit <- survfit(Surv(predicted_survival) ~ 1, data = new_data)
+# # Plot the survival curves
+# plot(surv_fit, main = "Survival Curves Based on Predicted Probabilities", xlab = "Time", ylab = "Survival Probability")
+
+```
+
+```{r}
+plot(baseline_hazard,type="l")
 ```

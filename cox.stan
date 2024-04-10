@@ -13,7 +13,7 @@ parameters {
 
 model {
   // Priors for coefficients
-  intercept ~ normal(-5, 2);
+  intercept ~ normal(0, 2);
   betas ~ normal(0, 2);
 
   // Likelihood function for Cox proportional hazards model

@@ -23,8 +23,7 @@ library(naniar)
 library(ggplot2)
 
 library(rstan)
-library(survstan)
-library(rstanarm)
+library(coda)
 library(brms)
 library(bayesplot)
 # library(tidyquant)
@@ -391,15 +390,15 @@ ggsurvplot(fit, conf.int = FALSE,
 ```
 
 ```{r}
-formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade +
-                                      recur_indic + progress_indic
-
-cox.brms <- brm(formula_cox, data = df2,
-                family = exponential(),
-                prior = c(prior(normal(0, 2), class = b)),
-                chains = 2, iter = 2500, warmup = 500,
-                control = list(adapt_delta = 0.99))
-# Increase adapt_delta if necessary for convergence
+# formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade +
+#                                       recur_indic + progress_indic
+# 
+# cox.brms <- brm(formula_cox, data = df2,
+#                 family = exponential(),
+#                 prior = c(prior(normal(0, 2), class = b)),
+#                 chains = 2, iter = 2500, warmup = 500,
+#                 control = list(adapt_delta = 0.99))
+# # Increase adapt_delta if necessary for convergence
 
 ```
 
@@ -423,15 +422,26 @@ stan_model <- stan_model(file = "cox.stan")
 ```
 
 ```{r}
-required_columns <- c("TumorSubtype", "AgeDX", "Stage", "Grade", 
+required_columns <- c("AgeDX", "Stage", "Grade", 
                       "recur_indic", "progress_indic")
 df_required <- df2[, required_columns, drop = FALSE]
+# baseline for TumorSubtype: Differentiated
+df_required$Immunoreactive <- as.integer(df2$TumorSubtype == "Immunoreactive")
+df_required$Mesenchymal <- as.integer(df2$TumorSubtype == "Mesenchymal")
+df_required$Proliferative <- as.integer(df2$TumorSubtype == "Proliferative")
+df_required$Stage = as.integer(df_required$Stage) - 1
+df_required$Grade = as.integer(df_required$Grade) - 1
 dim(df_required)
+summary(df_required)
+```
+
+```{r}
+colnames(df_required)
 ```
 
 ```{r}
 stan_data <- list(N = nrow(df_required),
-                  p = 6,  
+                  p = ncol(df_required),  
                   X = df_required,
                   time = df2$time,
                   event = df2$censor)
@@ -453,4 +463,22 @@ posterior_samples <- data.frame(extract(stan_fit))
 dim(posterior_samples)
 posterior_means = colMeans(posterior_samples)
 posterior_means
+```
+
+## plots
+
+```{r}
+posterior_mcmc <- mcmc(as.matrix(posterior_samples))
+ess <- effectiveSize(posterior_mcmc)
+ess
+```
+
+```{r}
+colnames(df_required)
+HPDinterval(posterior_mcmc)
+posterior_mcmc <- mcmc(as.matrix(posterior_samples))
+mcmc_intervals(posterior_mcmc[, c('betas.1','betas.2','betas.3')]) + 
+    vline_at(0,linetype="dashed")
+mcmc_intervals(posterior_mcmc[, c('betas.4','betas.5')])
+mcmc_intervals(posterior_mcmc[, c('betas.6','betas.7','betas.8')])
 ```

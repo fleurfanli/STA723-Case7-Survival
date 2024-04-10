@@ -161,6 +161,7 @@ ggplot(data = df, aes(x = factor(censor), y = AgeDX, fill = factor(censor))) +
 ## **Kaplan-Meier**
 
 ```{r}
+dim(df)
 colnames(df)
 head(df)
 table(df$censor)
@@ -227,10 +228,6 @@ table(df2$Grade)
 table(df2$Stage)
 ```
 
-```{r}
-sum(is.na(df2))
-```
-
 regroup therapy
 
 ```{r}
@@ -269,11 +266,15 @@ df2[df2$Therapy=='NO',]
 ### no tumor subtype
 
 ```{r}
+colnames(df2)
+```
+
+```{r}
 # surv_obj <- Surv(time, censor, event = event, type = "counting")
 # tt(DaysToProgress) + tt(DaysToRecur)
 #ChemoTherapy + HormonalTherapy + ImmunoTherapy + RadiationTherapy,
 
-cox.simple <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade + Therapy, 
+cox.simple <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade, 
                     robust = TRUE,
                     data = df2)
 summary(cox.simple)
@@ -284,10 +285,9 @@ ggsurvplot(survfit(cox.simple, data=df2),
 ```
 
 ```{r}
-cox.simple2 <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade +
-                       ChemoTherapy + HormonalTherapy + ImmunoTherapy + RadiationTherapy, 
-                     robust = TRUE,
-                   data = df2)
+cox.simple2 <- coxph(Surv(time, censor) ~ AgeDX + Stage + Grade + Therapy +
+                       recur_indic + progress_indic, 
+                     robust = TRUE, data = df2)
 summary(cox.simple2)
 
 ggsurvplot(survfit(cox.simple2, data=df2), 
@@ -307,9 +307,9 @@ plot(cox.zph)
 ### with tumor subtype
 
 ```{r}
-cox.type <- coxph(Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade + Therapy, 
-                  robust = TRUE,
-                   data = df2)
+cox.type <- coxph(Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade + 
+                    recur_indic + progress_indic, 
+                  robust = TRUE, data = df2)
 summary(cox.type)
 
 ggsurvplot(survfit(cox.type, data=df2), 
@@ -328,6 +328,8 @@ type_df <- with(df2,
                       AgeDX = rep(mean(df2$AgeDX),4),
                       Stage = rep(levels(df2$Stage)[1], 4),
                       Grade = rep(levels(df2$Grade)[1], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(0,4),
                       ChemoTherapy = rep(levels(factor(df2$ChemoTherapy))[1], 4),
                       HormonalTherapy = rep(levels(factor(df2$HormonalTherapy))[1], 4),
                       ImmunoTherapy = rep(levels(factor(df2$ImmunoTherapy))[1], 4),
@@ -336,17 +338,6 @@ type_df <- with(df2,
 
 type_df
 
-fit <- survfit(cox.type, data = type_df)
-ggsurvplot(fit,
-           data = type_df,
-           palette = "TumorSubtype", 
-           conf.int = TRUE,
-           ggtheme = theme_minimal()
-)
-
-```
-
-```{r}
 fit <- survfit(cox.type, newdata = type_df, data = df2)
 ggsurvplot(fit, conf.int = TRUE, 
            legend.labs = types,
@@ -355,3 +346,45 @@ ggsurvplot(fit, conf.int = FALSE,
            legend.labs = types,
            ggtheme = theme_minimal())
 ```
+
+```{r}
+type_df2 <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(0,4))
+
+fit <- survfit(cox.type, newdata = type_df2, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+type_df_recur <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(1,4),
+                      progress_indic = rep(0,4))
+
+fit <- survfit(cox.type, newdata = type_df_recur, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+
+type_df_progress <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(1,4))
+
+fit <- survfit(cox.type, newdata = type_df_progress, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```
+
+## BDA

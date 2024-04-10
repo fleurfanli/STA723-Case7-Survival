@@ -22,8 +22,11 @@ library(UpSetR)
 library(naniar)
 library(ggplot2)
 
-# library(brms)
-# library(bayesplot)
+library(rstan)
+library(survstan)
+library(rstanarm)
+library(brms)
+library(bayesplot)
 # library(tidyquant)
 
 # knitr options
@@ -387,4 +390,67 @@ ggsurvplot(fit, conf.int = FALSE,
            ggtheme = theme_minimal())
 ```
 
-## BDA
+```{r}
+formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade +
+                                      recur_indic + progress_indic
+
+cox.brms <- brm(formula_cox, data = df2,
+                family = exponential(),
+                prior = c(prior(normal(0, 2), class = b)),
+                chains = 2, iter = 2500, warmup = 500,
+                control = list(adapt_delta = 0.99))
+# Increase adapt_delta if necessary for convergence
+
+```
+
+# BDA
+
+```{r}
+# formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade + 
+#                                       recur_indic + progress_indic
+# 
+# cox.bayes <- stan_surv(formula = formula_cox, data = df2,
+#                       chains = 2, iter = 2500, warmup = 500)
+```
+
+```{r}
+formula_cox <- Surv(time, censor) ~ TumorSubtype + AgeDX + Stage + Grade + 
+                                      recur_indic + progress_indic
+
+# Compile Stan model
+stan_model <- stan_model(file = "cox.stan")
+
+```
+
+```{r}
+required_columns <- c("TumorSubtype", "AgeDX", "Stage", "Grade", 
+                      "recur_indic", "progress_indic")
+df_required <- df2[, required_columns, drop = FALSE]
+dim(df_required)
+```
+
+```{r}
+stan_data <- list(N = nrow(df_required),
+                  p = 6,  
+                  X = df_required,
+                  time = df2$time,
+                  event = df2$censor)
+
+stan_fit <- sampling(stan_model, data = stan_data, 
+                     chains = 2, warmup = 500, iter = 2500)
+
+```
+
+```{r}
+summary(stan_fit)
+
+traceplots <- mcmc_trace(stan_fit)
+plot(traceplots)
+```
+
+```{r}
+posterior_samples <- data.frame(extract(stan_fit))
+dim(posterior_samples)
+posterior_means = colMeans(posterior_samples)
+posterior_means
+```

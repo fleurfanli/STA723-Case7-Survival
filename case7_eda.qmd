@@ -68,10 +68,13 @@ recur = df$DaysToRecur > 0
 df_recur = df[recur,]
 df_recur$AgeDX = df_recur$AgeDX + (df_recur$DaysToRecur %/% 365)
 df_recur$recur_indic = 1
+df_recur$tstart = df_recur$DaysToRecur
+df_recur$tstop = df_recur$time
 
 df[recur,"VitalStatus"] = "LIVING"
 df[recur,"censor"] = 0
-df[recur, "time"] = df[recur, "DaysToRecur"]
+df[recur, "tstart"] = 0
+df[recur, "tstop"] = df[recur, "DaysToRecur"]
 df$recur_indic = 0
 
 df = rbind(df, df_recur)
@@ -81,10 +84,13 @@ progress = df$DaysToProgress > 0
 df_progress = df[progress,]
 df_progress$AgeDX = df_progress$AgeDX + round(df_progress$DaysToProgress / 365)
 df_progress$progress_indic = 1
+df_progress$tstart = df_progress$DaysToProgress
+df_progress$tstop = df_progress$time
 
 df[progress,"VitalStatus"] = "LIVING"
 df[progress,"censor"] = 0
-df[progress, "time"] = df[progress, "DaysToProgress"]
+df[progress, "tstart"] = 0
+df[progress, "tstop"] = df[progress, "DaysToProgress"]
 df$progress_indic = 0
 
 df = rbind(df, df_progress)
@@ -625,3 +631,7 @@ new_linear_predictor
 ```{r}
 plot(baseline_hazard,type="l")
 ```
+
+# Reference
+
+https://ermeel86.github.io/case_studies/surv_stan_example.html

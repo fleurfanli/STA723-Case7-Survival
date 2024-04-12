@@ -73,8 +73,10 @@ df_recur$tstop = df_recur$time
 
 df[recur,"VitalStatus"] = "LIVING"
 df[recur,"censor"] = 0
-df[recur, "tstart"] = 0
+df$tstart = 0
 df[recur, "tstop"] = df[recur, "DaysToRecur"]
+df[!recur, "tstop"] = df[!recur, "time"]
+
 df$recur_indic = 0
 
 df = rbind(df, df_recur)
@@ -89,13 +91,14 @@ df_progress$tstop = df_progress$time
 
 df[progress,"VitalStatus"] = "LIVING"
 df[progress,"censor"] = 0
-df[progress, "tstart"] = 0
+df$tstart = 0
 df[progress, "tstop"] = df[progress, "DaysToProgress"]
-df$progress_indic = 0
+df[!progress, "tstop"] = df[!progress, "time"]
 
+df$progress_indic = 0
 df = rbind(df, df_progress)
 
-df = df[,!colnames(df) %in% c("DaysToRecur", "DaysToProgress")]
+df = df[,!colnames(df) %in% c("DaysToRecur", "DaysToProgress", "time")]
 ```
 
 ```{r}

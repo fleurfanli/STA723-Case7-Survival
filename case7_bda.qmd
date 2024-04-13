@@ -518,6 +518,38 @@ set.seed(1)
 cox.snell.survregbayes(sp_model, ncurves=5, PLOT=TRUE)
 ```
 
+```{r}
+plot(sp_model, xnewdata = df2)
+```
+
+```{r}
+temp = plot(sp_model, xnewdata = type_df2)
+est = temp$Shat
+colnames(est) = type_df2$TumorSubtype
+lower = temp$Shatlow
+colnames(lower) = type_df2$TumorSubtype
+lower = pivot_longer(data.frame(lower), everything(), 
+                     values_to = "CI_lower", names_to = "TumorSubtype")
+lower$time = rep(temp$tgrid, each = 4)
+upper = temp$Shatup
+colnames(upper) = type_df2$TumorSubtype
+upper = pivot_longer(data.frame(upper), everything(), 
+                     values_to = "CI_upper", names_to = "TumorSubtype")
+upper$time = rep(temp$tgrid, each = 4)
+Shat = est %>% 
+  data.frame() %>%
+  pivot_longer(everything(), values_to = "estimation", names_to = "TumorSubtype") %>% 
+  mutate(time = rep(temp$tgrid, each = 4)) %>% 
+  left_join(lower, by = join_by(time, TumorSubtype)) %>% 
+  left_join(upper, by = join_by(time, TumorSubtype))
+ggplot(Shat, aes(x = time, y = estimation, group = TumorSubtype, 
+                 color = TumorSubtype)) + 
+  geom_line(size = 1) + 
+  geom_ribbon(aes(ymin = CI_lower, ymax = CI_upper, fill = TumorSubtype), color = NA, alpha = 0.2) + 
+  labs(y = "survival") + 
+  theme(legend.position="bottom") 
+```
+
 # Reference
 
 https://ermeel86.github.io/case_studies/surv_stan_example.html

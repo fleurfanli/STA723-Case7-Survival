@@ -1,0 +1,523 @@
+---
+title: "Case 7"
+author: "Li Fan and Shuo"
+format: pdf
+editor: visual
+---
+
+```{r, echo = FALSE, output = FALSE}
+#| label: load-packages
+#| message: false
+
+library(tidyverse)
+library(lme4)
+library(lmtest)
+library(mgcv)
+library(survival)
+library(survminer)
+library(tidymv)
+library(xtable)
+library(UpSetR)
+library(naniar)
+library(ggplot2)
+
+library(spBayesSurv)
+library(coda)
+library(bayesplot)
+
+# knitr options
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set the seed
+set.seed(42)
+```
+
+# EDA
+
+```{r}
+load("OvCaSurvival.RData") # df: clin
+dim(clin)
+head(clin)
+table(clin$TumorSubtype)
+```
+
+```{r}
+# delete: both day to death and day to last follow up is NA
+clin = clin[!(is.na(clin$DaysToDeath) & is.na(clin$DaysToLastFU)),]
+# censor indicator: DaysToDeath == NA, censored, alive
+clin$censor = as.numeric(!is.na(clin$DaysToDeath))
+# time: censored, DaysToLastFU; otherwise, DaysToDeath
+clin$time = ifelse(clin$censor, clin$DaysToDeath, clin$DaysToLastFU)
+# days to progress & recur: if NA, set to 0
+clin[is.na(clin$DaysToProgress), "DaysToProgress"] = 0
+clin[is.na(clin$DaysToRecur), "DaysToRecur"] = 0
+# remove column: "SampleID", "ResidualTumor"
+df = clin[,!colnames(clin) %in% c("DaysToDeath", "DaysToLastFU", "SampleID", "ResidualTumor")]
+colSums(is.na(df))
+gg_miss_upset(df, nsets = 8)
+df = na.omit(df)
+```
+
+```{r}
+# For recurrence
+recur = df$DaysToRecur > 0
+df_recur = df[recur,]
+df_recur$AgeDX = df_recur$AgeDX + (df_recur$DaysToRecur %/% 365)
+df_recur$recur_indic = 1
+df_recur$tstart = df_recur$DaysToRecur
+df_recur$tstop = df_recur$time
+
+df[recur,"VitalStatus"] = "LIVING"
+df[recur,"censor"] = 0
+df$tstart = 0
+df[recur, "tstop"] = df[recur, "DaysToRecur"]
+df[!recur, "tstop"] = df[!recur, "time"]
+
+df$recur_indic = 0
+
+df = rbind(df, df_recur)
+
+# For progress
+progress = df$DaysToProgress > 0
+df_progress = df[progress,]
+df_progress$AgeDX = df_progress$AgeDX + round(df_progress$DaysToProgress / 365)
+df_progress$progress_indic = 1
+df_progress$tstart = df_progress$DaysToProgress
+df_progress$tstop = df_progress$time
+
+df[progress,"VitalStatus"] = "LIVING"
+df[progress,"censor"] = 0
+df$tstart = 0
+df[progress, "tstop"] = df[progress, "DaysToProgress"]
+df[!progress, "tstop"] = df[!progress, "time"]
+
+df$progress_indic = 0
+df = rbind(df, df_progress)
+
+df = df[,!colnames(df) %in% c("DaysToRecur", "DaysToProgress", "time")]
+```
+
+```{r}
+dim(df)
+colnames(df)
+```
+
+```{r}
+ggplot(df, aes(x = TumorSubtype, y = time)) +
+  geom_boxplot() +
+  labs(x = "TumorSubtype", y = "DaysToDeath") 
+
+```
+
+```{r}
+ggplot(data = df, aes(x = AgeDX)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  ggtitle("Distribution of Age at Diagnosis") +
+  xlab("Age at Diagnosis") +
+  ylab("Count")
+```
+
+```{r}
+ggplot(data = df, aes(x = as.factor(Grade), y = time)) +
+  geom_boxplot() +
+  theme_minimal() +
+  ggtitle("Survival Time by Tumor Grade") +
+  xlab("Tumor Grade") +
+  ylab("Survival Time (days)")
+```
+
+```{r}
+ggplot(data = df, aes(x = AgeDX, y = time, color = VitalStatus)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  ggtitle("Age at Diagnosis vs. Survival Time") +
+  xlab("Age at Diagnosis") +
+  ylab("Survival Time (days)")
+```
+
+```{r}
+ggplot(data = df, aes(x = time, fill = VitalStatus)) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~VitalStatus) +
+  theme_minimal() +
+  ggtitle("Density of Survival Times by Vital Status") +
+  xlab("Survival Time (days)") +
+  ylab("Density")
+```
+
+```{r}
+df %>% 
+  mutate(censor_name = ifelse(censor, "censored", "non-censored")) %>% 
+  ggplot(aes(x = time)) +
+  geom_histogram(binwidth = 100, fill = "skyblue", color = "black", alpha = 0.7) +
+  facet_wrap(~VitalStatus, scales = "free_y") +
+  labs(title = "Survival Time Distribution by Vital Status",
+       x = "Survival Time (days)",
+       y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(data = df, aes(x = factor(censor), y = AgeDX, fill = factor(censor))) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "lightblue")) +
+  labs(title = "Age at Diagnosis by Censor Status",
+       x = "Censor Status",
+       y = "Age at Diagnosis",
+       fill = "Status") +
+  theme_minimal() +
+  scale_x_discrete(labels = c("0" = "Non-Censored", "1" = "Censored"))
+```
+
+## **Kaplan-Meier**
+
+```{r}
+dim(df)
+colnames(df)
+head(df)
+table(df$censor)
+```
+
+```{r}
+# The formula ~ 1 indicates that we are estimating the overall survival curve without any covariates.
+km_fit <- survfit(Surv(tstart, tstop, censor) ~ 1, data = df)
+# summary(km_fit)
+
+plot(km_fit, main = "Kaplan-Meier Survival Curve", 
+     xlab = "Time", ylab = "Survival Probability")
+```
+
+```{r}
+km_fit_group <- survfit(Surv(tstart, tstop, censor) ~ TumorSubtype, data = df)
+
+ggsurvplot(km_fit_group, data = df, 
+           title = "Kaplan-Meier Survival Curve by Tumor Subtype",
+           xlab = "Time", ylab = "Survival Probability",
+           legend.title = "Tumor Subtype",
+           legend = c(0.15, 0.2), # Adjust legend position
+           legend.labs = unique(df$TumorSubtype), 
+           ggtheme = theme_minimal())
+```
+
+## Cox model
+
+### re-group
+
+Only fit using age, tumor stage & grade, and treatment
+
+```{r}
+dim(df)
+colnames(df)
+summary(df$AgeDX)
+table(df$Stage)
+table(df$Grade)
+table(df$RadiationTherapy)
+
+aa = apply(df, 1, function(row) any(row == "YES"))
+table(aa)
+rows_without_yes <- df[!aa, ]
+print(rows_without_yes)
+```
+
+Re-group grades and drop unknown grades, re-group stages
+
+```{r}
+dim(df)
+df2 <- df %>% 
+  filter(Grade != "GB" & Grade != "GX") %>%
+  mutate(Grade = recode_factor(Grade, "G1" = "low",
+                                      "G2" = "low",
+                                      "G3" = "high",
+                                      "G4" = "high"))
+dim(df2)
+df2 <- df2 %>% 
+  mutate(Stage = recode_factor(Stage, "IIA" = "II","IIB" = "II","IIC" = "II",
+                                "IIIA" = "III","IIIB" = "III","IIIC" = "III"))
+head(df2)
+
+table(df2$Grade)
+table(df2$Stage)
+```
+
+regroup therapy
+
+```{r}
+df2$CombinedTherapy <- ifelse(df2$ChemoTherapy == "YES", "Chemo", "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$HormonalTherapy == "YES", "Hormonal", ""), 
+                              sep = "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$ImmunoTherapy == "YES", "Immuno", ""), 
+                              sep = "")
+df2$CombinedTherapy <- paste(df2$CombinedTherapy, 
+                              ifelse(df2$RadiationTherapy == "TES", "Radiation", ""), 
+                              sep = "")
+
+# Replace empty strings with "No"
+df2$CombinedTherapy[df2$CombinedTherapy == ""] <- "None"
+
+# Convert to factor
+df2$CombinedTherapy <- factor(df2$CombinedTherapy)
+
+# Check the levels
+table(df2$CombinedTherapy)
+```
+
+```{r}
+df2$Therapy <- ifelse(df2$ChemoTherapy == "YES" | 
+                        df2$HormonalTherapy == "YES" | 
+                        df2$ImmunoTherapy == "YES" | 
+                        df2$RadiationTherapy == "YES", "YES", "NO")
+
+df2$Therapy <- factor(df2$Therapy, levels = c("NO", "YES"))
+table(df2$Therapy)
+df2[df2$Therapy=='NO',]
+```
+
+### no tumor subtype
+
+```{r}
+colnames(df2)
+```
+
+```{r}
+# surv_obj <- Surv(time, censor, event = event, type = "counting")
+# tt(DaysToProgress) + tt(DaysToRecur)
+#ChemoTherapy + HormonalTherapy + ImmunoTherapy + RadiationTherapy,
+
+cox.simple <- coxph(Surv(tstart, tstop, censor) ~ AgeDX + Stage + Grade, 
+                    robust = TRUE, data = df2, id = ID)
+summary(cox.simple)
+
+ggsurvplot(survfit(cox.simple, data=df2), 
+           conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+cox.simple2 <- coxph(Surv(tstart, tstop, censor) ~ AgeDX + Stage + Grade + Therapy +
+                       recur_indic + progress_indic, 
+                     robust = TRUE, data = df2, id = ID)
+summary(cox.simple2)
+
+ggsurvplot(survfit(cox.simple2, data=df2), 
+           conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+### with tumor subtype
+
+```{r}
+dim(df2)
+colnames(df2)
+all(df2$tstop >= df2$tstart)
+all(df2$tstop > df2$tstart)
+df2[df2$tstop == df2$tstart, ]
+```
+
+```{r}
+cox.type <- coxph(Surv(tstart, tstop, censor) ~ TumorSubtype + AgeDX + Stage + 
+                    Grade + recur_indic + progress_indic, 
+                  robust = TRUE, data = df2, id = ID)
+summary(cox.type)
+
+ggsurvplot(survfit(cox.type, data=df2), 
+           conf.int = TRUE,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+# residuals
+resid = residuals(cox.type, type = "scaledsch")
+cumulative_hazard <- -log(survfit(cox.type)$surv)
+length(resid)
+length(cumulative_hazard)
+# # Plot Cox-Snell residuals against cumulative hazard
+# plot(cumulative_hazard, resid,
+#      xlab = "Cumulative Hazard", ylab = "Cox-Snell Residuals",
+#      main = "Cox-Snell Residuals vs Cumulative Hazard")
+```
+
+```{r}
+names(cox.type)
+```
+
+```{r}
+#rC : Cox-Snell residuals
+#rM : Martingale residuals 
+#rD : Deviance residuals
+pred = predict(cox.type,df2[df2$tstop>df2$tstart,], na.action = "na.omit")
+rC <- exp(((cox.type$y[,1])-log(pred)) / 1)
+# rC
+mean(rC)
+var(rC)
+
+qqplot((qexp(ppoints(length(rC)))),(rC))
+qqline(rC, distribution=qexp,col="red", lty=2)
+```
+
+```{r}
+types <- levels(factor(df2$TumorSubtype))
+type_df <- with(df2,
+  data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[1], 4),
+                      Grade = rep(levels(df2$Grade)[1], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(0,4),
+                      ChemoTherapy = rep(levels(factor(df2$ChemoTherapy))[1], 4),
+                      HormonalTherapy = rep(levels(factor(df2$HormonalTherapy))[1], 4),
+                      ImmunoTherapy = rep(levels(factor(df2$ImmunoTherapy))[1], 4),
+                      RadiationTherapy = rep(levels(factor(df2$RadiationTherapy))[1], 4))
+)
+
+type_df
+
+fit <- survfit(cox.type, newdata = type_df, data = df2)
+# ggsurvplot(fit, conf.int = TRUE, 
+#            legend.labs = types,
+#            ggtheme = theme_minimal())
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+type_df2 <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(0,4))
+
+fit <- survfit(cox.type, newdata = type_df2, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```
+
+```{r}
+type_df_recur <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(1,4),
+                      progress_indic = rep(0,4))
+
+fit <- survfit(cox.type, newdata = type_df_recur, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+
+type_df_progress <- data.frame(TumorSubtype = types, 
+                      AgeDX = rep(mean(df2$AgeDX),4),
+                      Stage = rep(levels(df2$Stage)[3], 4),
+                      Grade = rep(levels(df2$Grade)[2], 4),
+                      recur_indic = rep(0,4),
+                      progress_indic = rep(1,4))
+
+fit <- survfit(cox.type, newdata = type_df_progress, data = df2)
+ggsurvplot(fit, conf.int = FALSE, 
+           legend.labs = types,
+           ggtheme = theme_minimal())
+```
+
+# BDA
+
+```{r}
+prior <- list(coef = rep(0, 7), 
+              prec = diag(rep(0.01, 7))) # Large variance for uninformative prior
+
+mcmc_params <- list(nburn = 1000,  # Number of burn-in iterations
+                    nsave = 10000,  # Number of saved iterations
+                    nskip = 0,     # Number of iterations to skip between saving
+                    ndisplay = 2000) # Number of iterations to display progress
+
+surv_formula <- as.formula(Surv(tstart, tstop, censor) ~ TumorSubtype + AgeDX + Stage + Grade +
+                           recur_indic + progress_indic)
+
+sp_model <- survregbayes(surv_formula, survmodel="PH", dist="weibull",
+                         data = df2,
+                         prior = prior, 
+                         mcmc = mcmc_params)
+```
+
+```{r}
+summary(sp_model)
+```
+
+## plots
+
+```{r}
+names(sp_model)
+sp_model$mcmc
+```
+
+```{r}
+for (i in 1:9) {
+  samples <- mcmc(sp_model$beta[i,])
+  #print(paste0("Rhat for beta[", i, "]: ", gelman.diag(samples)$psrf))
+  print(paste0("ESS for beta[", i, "]: ", effectiveSize(samples)))
+}
+```
+
+```{r}
+par(mfrow=c(3,3))
+traceplot(mcmc(sp_model$beta[1,]), main="beta1")
+traceplot(mcmc(sp_model$beta[2,]), main="beta2")
+traceplot(mcmc(sp_model$beta[3,]), main="beta3")
+traceplot(mcmc(sp_model$beta[4,]), main="beta4")
+traceplot(mcmc(sp_model$beta[5,]), main="beta5")
+traceplot(mcmc(sp_model$beta[6,]), main="beta6")
+traceplot(mcmc(sp_model$beta[7,]), main="beta7")
+traceplot(mcmc(sp_model$beta[8,]), main="beta8")
+traceplot(mcmc(sp_model$beta[9,]), main="beta9")
+```
+
+## curves
+
+```{r}
+sp_model$dist
+sp_model$BF.baseline
+length(sp_model$alpha)
+```
+
+```{r}
+# Define the Weibull baseline hazard function
+baseline_hazard <- function(t, lambda, alpha) {
+  lambda * alpha * t^(alpha - 1)
+}
+
+# Define time points for visualization
+time_points <- seq(0, 1000, by = 0.1)
+
+# Specify Weibull parameters (lambda and alpha)
+lambda <- mean(sp_model$beta.scaled)
+alpha <- mean(sp_model$alpha)  # Example shape parameter
+
+# Calculate baseline hazard values
+baseline_hazard_values <- baseline_hazard(time_points, lambda, alpha)
+
+# Create a data frame for plotting
+plot_data <- data.frame(Time = time_points, Hazard = baseline_hazard_values)
+
+# Plot baseline hazard function
+ggplot(plot_data, aes(x = Time, y = Hazard)) +
+  geom_line() +
+  labs(x = "Time", y = "Baseline Hazard", 
+       title = "Baseline Hazard Function for Weibull Model") +
+  theme_minimal()
+
+```
+
+```{r}
+## Cox-Snell plot
+set.seed(1)
+cox.snell.survregbayes(sp_model, ncurves=5, PLOT=TRUE)
+```
+
+# Reference
+
+https://ermeel86.github.io/case_studies/surv_stan_example.html
